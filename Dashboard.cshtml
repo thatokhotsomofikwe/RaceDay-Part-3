@@ -1,0 +1,95 @@
+﻿@model RaceDay.MVC.Models.OrganiserDashboardViewModel
+
+@{
+    ViewData["Title"] = "Organiser Dashboard";
+}
+
+<div class="container py-5">
+    <div class="mb-5">
+        <h1 class="display-5 fw-bold">Organiser Dashboard</h1>
+        <p class="lead text-muted">
+            Welcome to your RaceDay event management dashboard.
+            Track your events and participant enrolments here.
+        </p>
+    </div>
+
+    @if (ViewBag.Error != null)
+    {
+        <div class="alert alert-warning">
+            @ViewBag.Error
+        </div>
+    }
+
+    <div class="row g-4 mb-5">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-primary mb-3">
+                        <h5 class="card-title">Total Events</h5>
+                    </div>
+
+                    <h2 class="display-4 fw-bold">
+                        @Model.TotalEvents
+                    </h2>
+
+                    <p class="text-muted mb-0">
+                        Events you organise
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-success mb-3">
+                        <h5 class="card-title">Total Enrolments</h5>
+                    </div>
+
+                    <h2 class="display-4 fw-bold">
+                        @Model.TotalEnrolments
+                    </h2>
+
+                    <p class="text-muted mb-0">
+                        Enrolments across your events
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-info mb-3">
+                        <h5 class="card-title">Upcoming Events</h5>
+                    </div>
+
+                    <h2 class="display-4 fw-bold">
+                        @Model.UpcomingEvents
+                    </h2>
+
+                    <p class="text-muted mb-0">
+                        Events scheduled for today or later
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            <h3 class="fw-bold mb-3">Manage Your Events</h3>
+
+            <p class="text-muted">
+                Create new events, update event information,
+                manage categories and view participant enrolments.
+            </p>
+
+            <a asp-controller="Organiser"
+               asp-action="ManageEvents"
+               class="btn btn-primary">
+                Manage Events
+            </a>
+        </div>
+    </div>
+</div>

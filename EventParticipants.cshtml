@@ -1,0 +1,60 @@
+﻿@model List<RaceDay.MVC.Models.EventParticipantViewModel>
+
+@{
+    ViewData["Title"] = "Event Participants";
+}
+
+<div class="container py-5">
+    <div class="mb-4">
+        <h1 class="display-5 fw-bold">Event Participants</h1>
+        <p class="lead">View the participants enrolled in this event.</p>
+    </div>
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger">
+            @TempData["Error"]
+        </div>
+    }
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">
+            No participants have enrolled in this event yet.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Participant</th>
+                        <th>Category</th>
+                        <th>Enrolment Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var participant in Model)
+                    {
+                        <tr>
+                            <td>@participant.ParticipantName</td>
+                            <td>@participant.CategoryName</td>
+                            <td>@participant.EnrolmentDate.ToString("dd MMM yyyy")</td>
+                            <td>@participant.Status</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="mt-4">
+        <a asp-controller="Organiser"
+           asp-action="ManageEvents"
+           class="btn btn-outline-secondary">
+            Back to Manage Events
+        </a>
+    </div>
+</div>

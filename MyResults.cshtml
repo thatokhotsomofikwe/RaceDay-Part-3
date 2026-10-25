@@ -1,0 +1,115 @@
+﻿@model List<RaceDay.MVC.Models.ResultViewModel>
+
+@{
+    ViewData["Title"] = "My Results";
+}
+
+<div class="container py-5">
+    <div class="mb-4">
+        <h1 class="display-5 fw-bold">My Results</h1>
+        <p class="text-muted">
+            View your race finishing times, positions and results.
+        </p>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">@TempData["Success"]</div>
+    }
+
+    @if (ViewBag.Error != null)
+    {
+        <div class="alert alert-warning">@ViewBag.Error</div>
+    }
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="card shadow-sm">
+            <div class="card-body text-center py-5">
+                <h2 class="h4">No results available yet</h2>
+                <p class="text-muted">
+                    Your results will appear here once an organiser records them.
+                </p>
+                <a asp-controller="Events"
+                   asp-action="Index"
+                   class="btn btn-primary">
+                    Browse Events
+                </a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var result in Model)
+            {
+                <div class="col-md-6 col-lg-4">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-body">
+                            <h2 class="h5 fw-bold">@result.EventName</h2>
+
+                            <p class="text-muted mb-3">
+                                @result.CategoryName
+                            </p>
+
+                            <hr />
+
+                            <p>
+                                <strong>Finishing Time:</strong>
+                                @(result.FinishTime.HasValue
+                                    ? result.FinishTime.Value.ToString(@"hh\:mm\:ss")
+                                    : "Not recorded")
+                            </p>
+
+                            <p>
+                                <strong>Position:</strong>
+                                @(result.Position.HasValue
+                                    ? result.Position.Value.ToString()
+                                    : "Not assigned")
+                            </p>
+
+                            <p>
+                                <strong>Status:</strong>
+                                @if (result.Status == "Finished")
+                                {
+                                    <span class="badge bg-success">Finished</span>
+                                }
+                                else if (result.Status == "DidNotFinish")
+                                {
+                                    <span class="badge bg-warning text-dark">
+                                        Did Not Finish
+                                    </span>
+                                }
+                                else if (result.Status == "Disqualified")
+                                {
+                                    <span class="badge bg-danger">
+                                        Disqualified
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">
+                                        @result.Status
+                                    </span>
+                                }
+                            </p>
+
+                            <p class="small text-muted mb-0">
+                                Recorded:
+                                @result.RecordedAt.ToLocalTime().ToString("dd MMM yyyy")
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="mt-4">
+        <a asp-controller="Home"
+           asp-action="Index"
+           class="btn btn-outline-secondary">
+            Back to Home
+        </a>
+    </div>
+</div>

@@ -1,0 +1,277 @@
+﻿@model List<RaceDay.MVC.Models.ResultViewModel>
+
+@using RaceDay.MVC.Models
+
+@{
+    ViewData["Title"] = "Manage Results";
+    int eventId = ViewBag.EventID ?? 0;
+    var enrolments = ViewBag.Enrolments as List<EventEnrolmentViewModel>
+                     ?? new List<EventEnrolmentViewModel>();
+}
+
+<div class="container py-5">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+        <div>
+            <h1 class="display-5 fw-bold">Manage Results</h1>
+            <p class="text-muted mb-0">
+                Record and manage finishing results for Event #@eventId.
+            </p>
+        </div>
+
+        <a asp-controller="Organiser"
+           asp-action="ManageEvents"
+           class="btn btn-outline-secondary">
+            Back to My Events
+        </a>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">@TempData["Success"]</div>
+    }
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger">@TempData["Error"]</div>
+    }
+
+    @if (ViewBag.Error != null)
+    {
+        <div class="alert alert-warning">@ViewBag.Error</div>
+    }
+
+    <div class="card shadow-sm mb-5">
+        <div class="card-body">
+            <h2 class="h4 mb-3">Record a Result</h2>
+
+            @if (!enrolments.Any())
+            {
+                <div class="alert alert-info">
+                    No enrolments could be loaded for this event.
+                    Check that participants are enrolled and that the API request succeeds.
+                </div>
+            }
+            else
+            {
+                <form asp-controller="Results"
+                      asp-action="Create"
+                      method="post">
+
+                    @Html.AntiForgeryToken()
+
+                    <input type="hidden" name="eventId" value="@eventId" />
+
+                    <div class="mb-3">
+                        <label class="form-label" for="enrolmentId">
+                            Enrolled Participant
+                        </label>
+
+                        <select class="form-select"
+                                id="enrolmentId"
+                                name="enrolmentId"
+                                required>
+                            <option value="">Select a participant</option>
+
+                            @foreach (var enrolment in enrolments)
+                            {
+                                @if (enrolment.Status != "Cancelled")
+                                {
+                                    <option value="@enrolment.EnrolmentID">
+                                        @enrolment.ParticipantName
+                                        — @enrolment.CategoryName
+                                        (Enrolment #@enrolment.EnrolmentID)
+                                    </option>
+                                }
+                            }
+                        </select>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label" for="finishTime">
+                                Finishing Time
+                            </label>
+                            <input class="form-control"
+                                   type="time"
+                                   id="finishTime"
+                                   name="finishTime"
+                                   step="1" />
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label" for="position">
+                                Finishing Position
+                            </label>
+                            <input class="form-control"
+                                   type="number"
+                                   id="position"
+                                   name="position"
+                                   min="1" />
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label" for="status">
+                                Result Status
+                            </label>
+                            <select class="form-select"
+                                    id="status"
+                                    name="status"
+                                    required>
+                                <option value="Finished">Finished</option>
+                                <option value="DidNotFinish">Did Not Finish</option>
+                                <option value="Disqualified">Disqualified</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mt-4">
+                        Record Result
+                    </button>
+                </form>
+            }
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <h2 class="h3">Recorded Results</h2>
+        <p class="text-muted">
+            Update a result or delete one that was recorded incorrectly.
+        </p>
+    </div>
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">
+            No results have been recorded for this event yet.
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var result in Model)
+            {
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                                <div>
+                                    <h3 class="h5 mb-1">@result.ParticipantName</h3>
+                                    <p class="text-muted mb-0">
+                                        @result.CategoryName
+                                        · Enrolment #@result.EnrolmentID
+                                        · Result #@result.ResultID
+                                    </p>
+                                </div>
+
+                                <span class="badge bg-secondary">
+                                    @result.Status
+                                </span>
+                            </div>
+
+                            <form asp-controller="Results"
+                                  asp-action="Update"
+                                  method="post">
+
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden"
+                                       name="eventId"
+                                       value="@eventId" />
+
+                                <input type="hidden"
+                                       name="resultId"
+                                       value="@result.ResultID" />
+
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">
+                                            Finishing Time
+                                        </label>
+                                        <input class="form-control"
+                                               type="time"
+                                               name="finishTime"
+                                               step="1"
+                                               value="@(result.FinishTime.HasValue ? result.FinishTime.Value.ToString(@"hh\:mm\:ss") : "")" />
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">
+                                            Finishing Position
+                                        </label>
+                                        <input class="form-control"
+                                               type="number"
+                                               name="position"
+                                               min="1"
+                                               value="@result.Position" />
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label class="form-label">
+                                            Result Status
+                                        </label>
+                                        <select class="form-select"
+                                                name="status"
+                                                required>
+                                            @if (result.Status == "Finished")
+                                            {
+                                                <option value="Finished" selected>Finished</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="Finished">Finished</option>
+                                            }
+
+                                            @if (result.Status == "DidNotFinish")
+                                            {
+                                                <option value="DidNotFinish" selected>Did Not Finish</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="DidNotFinish">Did Not Finish</option>
+                                            }
+
+                                            @if (result.Status == "Disqualified")
+                                            {
+                                                <option value="Disqualified" selected>Disqualified</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="Disqualified">Disqualified</option>
+                                            }
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary mt-3">
+                                    Save Changes
+                                </button>
+                            </form>
+
+                            <form asp-controller="Results"
+                                  asp-action="Delete"
+                                  method="post"
+                                  class="mt-2"
+                                  onsubmit="return confirm('Are you sure you want to delete this result?');">
+
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden"
+                                       name="eventId"
+                                       value="@eventId" />
+
+                                <input type="hidden"
+                                       name="resultId"
+                                       value="@result.ResultID" />
+
+                                <button type="submit"
+                                        class="btn btn-outline-danger">
+                                    Delete Result
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
