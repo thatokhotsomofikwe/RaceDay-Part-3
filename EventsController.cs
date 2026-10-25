@@ -1,147 +1,115 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RaceDay.API.Data;
-using RaceDay.API.Models;
-using RaceDay.API.Security;
+﻿using Microsoft.AspNetCore.Mvc;
+using RaceDay.MVC.Services;
+using RaceDay.MVC.Models;
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading.Tasks;
 
-namespace RaceDay.API.Controllers
+namespace RaceDay.MVC.Controllers
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class EventsController : ControllerBase
+    public class EventsController : Controller
     {
-        private readonly AppDbContext _context;
+        private readonly RaceDayApiService _api;
 
-        public EventsController(AppDbContext context)
+        public EventsController(RaceDayApiService api)
         {
-            _context = context;
+            _api = api;
         }
 
-        // GET: api/events (Public)
-        [HttpGet]
-        public async Task<IActionResult> GetEvents()
+        // Browse all events
+        public async Task<IActionResult> Index()
         {
-            var events = await _context.Events
-                .Include(e => e.Categories)
-                .ToListAsync();
+            try
+            {
+                var events = await _api.GetAsync<List<EventViewModel>>(
+                    "api/events");
 
-            return Ok(events);
+                events ??= new List<EventViewModel>();
+
+                foreach (var ev in events)
+                {
+                    ev.ImageUrl = await _api.GetEventImageUrlAsync(
+                        ev.EventID);
+                }
+
+                return View(events);
+            }
+            catch
+            {
+                ViewBag.Error = "Unable to load events. Please check that the RaceDay API is running.";
+                return View(new List<EventViewModel>());
+            }
         }
 
-        // GET: api/events/5 (Public)
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetEvent(int id)
+        // Display details for one event
+        public async Task<IActionResult> Details(int id)
         {
-            var ev = await _context.Events
-                .Include(e => e.Categories)
-                .FirstOrDefaultAsync(e => e.EventID == id);
-
-            if (ev == null)
+            if (id <= 0)
             {
                 return NotFound();
             }
 
-            return Ok(ev);
+            try
+            {
+                var eventDetails = await _api.GetAsync<EventViewModel>(
+                    $"api/events/{id}");
+
+                if (eventDetails == null)
+                {
+                    return NotFound();
+                }
+
+                eventDetails.ImageUrl =
+                    await _api.GetEventImageUrlAsync(id);
+
+                var categories = await _api.GetAsync<List<CategoryViewModel>>(
+                    $"api/events/{id}/categories");
+
+                var model = new EventDetailsViewModel
+                {
+                    Event = eventDetails,
+                    Categories = categories ?? new List<CategoryViewModel>()
+                };
+
+                return View(model);
+            }
+            catch (HttpRequestException)
+            {
+                ViewBag.Error = "Unable to load event details. Please check that the RaceDay API is running.";
+                return View("DetailsError");
+            }
         }
+    }
 
-        // POST: api/events (Organiser only)
-        [HttpPost]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> CreateEvent(
-            [FromBody] Event newEvent)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
+    // Event information used by the Browse Events and Details pages
+    public class EventViewModel
+    {
+        public int EventID { get; set; }
 
-            if (userId == null)
-            {
-                return Unauthorized();
-            }
+        public string Name { get; set; } = string.Empty;
 
-            newEvent.OrganiserID = userId.Value;
-            newEvent.Status = "Upcoming";
+        public string Description { get; set; } = string.Empty;
 
-            _context.Events.Add(newEvent);
-            await _context.SaveChangesAsync();
+        public DateTime EventDate { get; set; }
 
-            return CreatedAtAction(
-                nameof(GetEvent),
-                new { id = newEvent.EventID },
-                newEvent);
-        }
+        public string Location { get; set; } = string.Empty;
 
-        // PUT: api/events/5 (Organiser only)
-        [HttpPut("{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> UpdateEvent(
-            int id,
-            [FromBody] Event updatedEvent)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            var ev = await _context.Events.FindAsync(id);
+        public double Distance { get; set; }
 
-            if (ev == null)
-            {
-                return NotFound();
-            }
+        public string EventType { get; set; } = string.Empty;
 
-            if (ev.OrganiserID != userId)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden);
-            }
+        public string Status { get; set; } = string.Empty;
 
-            ev.EventName = updatedEvent.EventName;
-            ev.Description = updatedEvent.Description;
-            ev.EventDate = updatedEvent.EventDate;
-            ev.StartTime = updatedEvent.StartTime;
-            ev.Location = updatedEvent.Location;
-            ev.EventType = updatedEvent.EventType;
+        public string? ImageUrl { get; set; }
+    }
 
-            await _context.SaveChangesAsync();
+    // Combines event information and its categories for the Details page
+    public class EventDetailsViewModel
+    {
+        public EventViewModel Event { get; set; } = new EventViewModel();
 
-            return Ok(ev);
-        }
-
-        // DELETE: api/events/5 (Organiser only)
-        [HttpDelete("{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> DeleteEvent(int id)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            var ev = await _context.Events.FindAsync(id);
-
-            if (ev == null)
-            {
-                return NotFound();
-            }
-
-            if (ev.OrganiserID != userId)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            _context.Events.Remove(ev);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        [HttpGet("mine")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> GetMyEvents()
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-
-            if (userId == null)
-            {
-                return Unauthorized();
-            }
-
-            var events = await _context.Events
-                .Include(e => e.Categories)
-                .Where(e => e.OrganiserID == userId.Value)
-                .ToListAsync();
-
-            return Ok(events);
-        }
+        public List<CategoryViewModel> Categories { get; set; }
+            = new List<CategoryViewModel>();
     }
 }

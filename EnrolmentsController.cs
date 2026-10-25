@@ -1,173 +1,166 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RaceDay.API.Data;
-using RaceDay.API.Models;
-using RaceDay.API.Security;
+using RaceDay.MVC.Models;
+using RaceDay.MVC.Services;
+using System.Text.Json;
 
-namespace RaceDay.API.Controllers
+namespace RaceDay.MVC.Controllers
 {
-    [ApiController]
-    [Route("api")]
-    public class EnrolmentsController : ControllerBase
+    public class EnrolmentsController : Controller
     {
-        private readonly AppDbContext _context;
+        private readonly RaceDayApiService _apiService;
 
-        public EnrolmentsController(AppDbContext context)
+        public EnrolmentsController(RaceDayApiService apiService)
         {
-            _context = context;
+            _apiService = apiService;
         }
 
-        // POST: api/events/{eventId}/enrolments
-        [HttpPost("events/{eventId}/enrolments")]
-        [RoleAuthorize("Participant")]
-        public async Task<IActionResult> CreateEnrolment(
-            int eventId, CreateEnrolmentRequest request)
+        [HttpGet]
+        public async Task<IActionResult> Create(int eventId)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
-
-            var ev = await _context.Events
-                .FirstOrDefaultAsync(e => e.EventID == eventId);
-
-            if (ev == null) return NotFound("Event not found.");
-
-            if (ev.Status != "Open")
-                return BadRequest("This event is not open for enrolment.");
-
-            var category = await _context.Categories
-                .FirstOrDefaultAsync(c =>
-                    c.CategoryID == request.CategoryID &&
-                    c.EventID == eventId);
-
-            if (category == null)
-                return BadRequest("The category does not belong to this event.");
-
-            var existing = await _context.Enrolments
-                .AnyAsync(e => e.EventID == eventId &&
-                               e.ParticipantID == userId.Value);
-
-            if (existing)
-                return Conflict("You are already enrolled in this event.");
-
-            var count = await _context.Enrolments
-                .CountAsync(e => e.CategoryID == category.CategoryID &&
-                                 e.Status == "Confirmed");
-
-            if (count >= category.MaxParticipants)
-                return Conflict("This category is full.");
-
-            var enrolment = new Enrolment
+            if (HttpContext.Session.GetString("Role") != "Participant")
             {
-                EventID = eventId,
-                CategoryID = category.CategoryID,
-                ParticipantID = userId.Value,
-                EnrolmentDate = DateTime.UtcNow,
-                Status = "Confirmed"
-            };
+                return RedirectToAction("Login", "Auth");
+            }
 
-            _context.Enrolments.Add(enrolment);
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
 
             try
             {
-                await _context.SaveChangesAsync();
+                var eventItem = await _apiService.GetAsync<JsonElement>(
+                    $"api/events/{eventId}", cookie);
+
+                var categories = await _apiService.GetAsync<List<CategoryOptionViewModel>>(
+                    $"api/events/{eventId}/categories", cookie);
+
+                var model = new EnrolmentCreateViewModel
+                {
+                    EventID = eventId,
+                    EventName = eventItem.TryGetProperty("eventName", out var name)
+                        ? name.GetString() ?? "Selected event"
+                        : "Selected event",
+                    Categories = categories ?? new List<CategoryOptionViewModel>()
+                };
+
+                if (!model.Categories.Any())
+                {
+                    ViewBag.Error = "There are no categories available for this event.";
+                }
+
+                return View(model);
             }
-            catch (DbUpdateException)
+            catch (HttpRequestException)
             {
-                return Conflict("The enrolment could not be created. Check whether you are already enrolled.");
+                ViewBag.Error = "Unable to load this event. Please try again.";
+                return View(new EnrolmentCreateViewModel
+                {
+                    EventID = eventId,
+                    EventName = "Selected event"
+                });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(EnrolmentCreateViewModel model)
+        {
+            if (HttpContext.Session.GetString("Role") != "Participant")
+            {
+                return RedirectToAction("Login", "Auth");
             }
 
-            return Ok(enrolment);
-        }
+            if (model.CategoryID <= 0)
+            {
+                ModelState.AddModelError(
+                    nameof(model.CategoryID),
+                    "Please select a category.");
+            }
 
-        // GET: api/enrolments/me
-        [HttpGet("enrolments/me")]
-        [RoleAuthorize("Participant")]
-        public async Task<IActionResult> GetMyEnrolments()
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
 
-            var enrolments = await _context.Enrolments
-                .Where(e => e.ParticipantID == userId.Value)
-                .Include(e => e.Event)
-                .Include(e => e.Category)
-                .Select(e => new
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
+
+            try
+            {
+                using var response = await _apiService.PostAsync(
+                    $"api/events/{model.EventID}/enrolments",
+                    new { CategoryID = model.CategoryID },
+                    cookie);
+
+                if (response.IsSuccessStatusCode)
                 {
-                    e.EnrolmentID,
-                    e.EventID,
-                    EventName = e.Event!.EventName,
-                    e.CategoryID,
-                    CategoryName = e.Category!.CategoryName,
-                    e.EnrolmentDate,
-                    e.Status
-                })
-                .ToListAsync();
+                    TempData["Success"] = "You have successfully enrolled in this event.";
+                    return RedirectToAction("MyEnrolments");
+                }
 
-            return Ok(enrolments);
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Enrolment failed. You may already be enrolled, the category may be full, or the event may not be open.");
+            }
+            catch (HttpRequestException)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to contact the RaceDay API. Please try again.");
+            }
+
+            return View(model);
         }
 
-        // DELETE: api/enrolments/{id}
-        [HttpDelete("enrolments/{id}")]
-        [RoleAuthorize("Participant")]
-        public async Task<IActionResult> CancelEnrolment(int id)
+        [HttpGet]
+        public async Task<IActionResult> MyEnrolments()
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
+            if (HttpContext.Session.GetString("Role") != "Participant")
+            {
+                return RedirectToAction("Login", "Auth");
+            }
 
-            var enrolment = await _context.Enrolments
-                .FirstOrDefaultAsync(e =>
-                    e.EnrolmentID == id &&
-                    e.ParticipantID == userId.Value);
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
 
-            if (enrolment == null) return NotFound();
+            try
+            {
+                var enrolments = await _apiService.GetAsync<List<EnrolmentViewModel>>(
+                    "api/enrolments/me", cookie);
 
-            if (enrolment.Status == "Cancelled")
-                return BadRequest("This enrolment is already cancelled.");
-
-            enrolment.Status = "Cancelled";
-            await _context.SaveChangesAsync();
-
-            return NoContent();
+                return View(enrolments ?? new List<EnrolmentViewModel>());
+            }
+            catch (HttpRequestException)
+            {
+                ViewBag.Error = "Unable to load your enrolments.";
+                return View(new List<EnrolmentViewModel>());
+            }
         }
 
-        // GET: api/events/{eventId}/enrolments
-        [HttpGet("events/{eventId}/enrolments")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> GetEventEnrolments(int eventId)
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Cancel(int id)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
+            if (HttpContext.Session.GetString("Role") != "Participant")
+            {
+                return RedirectToAction("Login", "Auth");
+            }
 
-            var ev = await _context.Events
-                .FirstOrDefaultAsync(e => e.EventID == eventId);
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
 
-            if (ev == null) return NotFound("Event not found.");
+            try
+            {
+                using var response = await _apiService.DeleteAsync(
+                    $"api/enrolments/{id}", cookie);
 
-            if (ev.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
+                TempData[response.IsSuccessStatusCode ? "Success" : "Error"] =
+                    response.IsSuccessStatusCode
+                        ? "Your enrolment has been cancelled."
+                        : "Unable to cancel this enrolment.";
 
-            var enrolments = await _context.Enrolments
-                .Where(e => e.EventID == eventId)
-                .Include(e => e.Participant)
-                .Include(e => e.Category)
-                .Select(e => new
-                {
-                    e.EnrolmentID,
-                    e.ParticipantID,
-                    ParticipantName = e.Participant!.FullName,
-                    e.CategoryID,
-                    CategoryName = e.Category!.CategoryName,
-                    e.EnrolmentDate,
-                    e.Status
-                })
-                .ToListAsync();
-
-            return Ok(enrolments);
+                return RedirectToAction("MyEnrolments");
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] = "Unable to contact the RaceDay API.";
+                return RedirectToAction("MyEnrolments");
+            }
         }
-    }
-
-    public class CreateEnrolmentRequest
-    {
-        public int CategoryID { get; set; }
     }
 }

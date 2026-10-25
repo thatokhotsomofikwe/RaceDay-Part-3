@@ -1,231 +1,235 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RaceDay.API.Data;
-using RaceDay.API.Models;
-using RaceDay.API.Security;
+using RaceDay.MVC.Models;
+using RaceDay.MVC.Services;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
-namespace RaceDay.API.Controllers
+namespace RaceDay.MVC.Controllers
 {
-    [ApiController]
-    [Route("api")]
-    public class ResultsController : ControllerBase
+    public class ResultsController : Controller
     {
-        private readonly AppDbContext _context;
+        private readonly RaceDayApiService _api;
 
-        public ResultsController(AppDbContext context)
+        public ResultsController(RaceDayApiService api)
         {
-            _context = context;
+            _api = api;
         }
 
-        // GET: api/results/me
-        [HttpGet("results/me")]
-        [RoleAuthorize("Participant")]
-        public async Task<IActionResult> GetMyResults()
+        // Participant: view personal results
+        public async Task<IActionResult> MyResults()
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
-
-            var results = await _context.Results
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Event)
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Category)
-                .Where(r => r.Enrolment!.ParticipantID == userId.Value)
-                .Select(r => new
-                {
-                    r.ResultID,
-                    r.EnrolmentID,
-                    EventName = r.Enrolment!.Event!.EventName,
-                    CategoryName = r.Enrolment.Category!.CategoryName,
-                    r.FinishTime,
-                    r.Position,
-                    r.Status,
-                    r.RecordedAt
-                })
-                .ToListAsync();
-
-            return Ok(results);
-        }
-
-        // GET: api/events/{eventId}/results
-        [HttpGet("events/{eventId}/results")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> GetEventResults(int eventId)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
-
-            var ev = await _context.Events
-                .FirstOrDefaultAsync(e => e.EventID == eventId);
-
-            if (ev == null) return NotFound("Event not found.");
-
-            if (ev.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
-
-            var results = await _context.Results
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Participant)
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Category)
-                .Where(r => r.Enrolment!.EventID == eventId)
-                .Select(r => new
-                {
-                    r.ResultID,
-                    r.EnrolmentID,
-                    ParticipantName = r.Enrolment!.Participant!.FullName,
-                    CategoryName = r.Enrolment.Category!.CategoryName,
-                    r.FinishTime,
-                    r.Position,
-                    r.Status,
-                    r.RecordedAt
-                })
-                .ToListAsync();
-
-            return Ok(results);
-        }
-
-        // POST: api/events/{eventId}/results
-        [HttpPost("events/{eventId}/results")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> CreateResult(
-            int eventId, CreateResultRequest request)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
-
-            var ev = await _context.Events
-                .FirstOrDefaultAsync(e => e.EventID == eventId);
-
-            if (ev == null) return NotFound("Event not found.");
-
-            if (ev.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
-
-            var enrolment = await _context.Enrolments
-                .FirstOrDefaultAsync(e =>
-                    e.EnrolmentID == request.EnrolmentID &&
-                    e.EventID == eventId);
-
-            if (enrolment == null)
-                return BadRequest(
-                    "The enrolment does not belong to this event.");
-
-            var alreadyHasResult = await _context.Results
-                .AnyAsync(r => r.EnrolmentID == request.EnrolmentID);
-
-            if (alreadyHasResult)
-                return Conflict("This enrolment already has a result.");
-
-            if (!IsValidStatus(request.Status))
-                return BadRequest(
-                    "Status must be Finished, DidNotFinish or Disqualified.");
-
-            if (request.Position.HasValue && request.Position.Value <= 0)
-                return BadRequest("Position must be greater than zero.");
-
-            var result = new Result
+            if (HttpContext.Session.GetString("Role") != "Participant")
             {
-                EnrolmentID = request.EnrolmentID,
-                FinishTime = request.FinishTime,
-                Position = request.Position,
-                Status = request.Status,
-                RecordedAt = DateTime.UtcNow
-            };
-
-            _context.Results.Add(result);
+                return RedirectToAction("Login", "Auth");
+            }
 
             try
             {
-                await _context.SaveChangesAsync();
+                var results = await _api.GetAsync<List<ResultViewModel>>(
+                    "api/results/me");
+
+                return View(results ?? new List<ResultViewModel>());
             }
-            catch (DbUpdateException)
+            catch (HttpRequestException)
             {
-                return Conflict("The result could not be saved.");
+                ViewBag.Error =
+                    "Unable to load your results. Please check that the API is running.";
+
+                return View(new List<ResultViewModel>());
+            }
+        }
+
+        // Organiser: view results and eligible enrolments for an event
+        public async Task<IActionResult> Manage(int eventId)
+        {
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+            {
+                return RedirectToAction("Login", "Auth");
             }
 
-            return Ok(result);
+            if (eventId <= 0)
+            {
+                return RedirectToAction("ManageEvents", "Organiser");
+            }
+
+            try
+            {
+                var results = await _api.GetAsync<List<ResultViewModel>>(
+                    $"api/events/{eventId}/results");
+
+                var enrolments = await _api.GetAsync<List<EventEnrolmentViewModel>>(
+                    $"api/events/{eventId}/enrolments");
+
+                ViewBag.EventID = eventId;
+                ViewBag.Enrolments = enrolments ?? new List<EventEnrolmentViewModel>();
+
+                return View(results ?? new List<ResultViewModel>());
+            }
+            catch (HttpRequestException)
+            {
+                ViewBag.EventID = eventId;
+                ViewBag.Enrolments = new List<EventEnrolmentViewModel>();
+                ViewBag.Error =
+                    "Unable to load results or enrolments. Check the API connection and your access to this event.";
+
+                return View(new List<ResultViewModel>());
+            }
         }
 
-        // PUT: api/results/{id}
-        [HttpPut("results/{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> UpdateResult(
-            int id, UpdateResultRequest request)
+        // Organiser: record a result
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(
+            int eventId,
+            int enrolmentId,
+            string? finishTime,
+            int? position,
+            string status)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+            {
+                return RedirectToAction("Login", "Auth");
+            }
 
-            var result = await _context.Results
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Event)
-                .FirstOrDefaultAsync(r => r.ResultID == id);
+            TimeSpan? parsedTime = null;
 
-            if (result == null) return NotFound();
+            if (!string.IsNullOrWhiteSpace(finishTime))
+            {
+                if (!TimeSpan.TryParse(finishTime, out var time) ||
+                    time < TimeSpan.Zero)
+                {
+                    TempData["Error"] = "Please enter a valid finishing time.";
+                    return RedirectToAction(nameof(Manage), new { eventId });
+                }
 
-            if (result.Enrolment?.Event?.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
+                parsedTime = time;
+            }
 
-            if (!IsValidStatus(request.Status))
-                return BadRequest(
-                    "Status must be Finished, DidNotFinish or Disqualified.");
+            var request = new
+            {
+                EnrolmentID = enrolmentId,
+                FinishTime = parsedTime,
+                Position = position,
+                Status = status
+            };
 
-            if (request.Position.HasValue && request.Position.Value <= 0)
-                return BadRequest("Position must be greater than zero.");
+            try
+            {
+                using var response = await _api.PostAsync(
+                    $"api/events/{eventId}/results", request,
+                    HttpContext.Session.GetString("ApiSessionCookie"));
 
-            result.FinishTime = request.FinishTime;
-            result.Position = request.Position;
-            result.Status = request.Status;
+                if (!response.IsSuccessStatusCode)
+                {
+                    TempData["Error"] =
+                        "Could not record the result. The enrolment may be invalid or already have a result.";
+                }
+                else
+                {
+                    TempData["Success"] = "Result recorded successfully.";
+                }
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] = "Unable to connect to the RaceDay API.";
+            }
 
-            await _context.SaveChangesAsync();
-
-            return Ok(result);
+            return RedirectToAction(nameof(Manage), new { eventId });
         }
 
-        // DELETE: api/results/{id}
-        [HttpDelete("results/{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> DeleteResult(int id)
+        // Organiser: update an existing result
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Update(
+            int eventId,
+            int resultId,
+            string? finishTime,
+            int? position,
+            string status)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-            if (userId == null) return Unauthorized();
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+            {
+                return RedirectToAction("Login", "Auth");
+            }
 
-            var result = await _context.Results
-                .Include(r => r.Enrolment!)
-                    .ThenInclude(e => e.Event)
-                .FirstOrDefaultAsync(r => r.ResultID == id);
+            TimeSpan? parsedTime = null;
 
-            if (result == null) return NotFound();
+            if (!string.IsNullOrWhiteSpace(finishTime))
+            {
+                if (!TimeSpan.TryParse(finishTime, out var time) ||
+                    time < TimeSpan.Zero)
+                {
+                    TempData["Error"] = "Please enter a valid finishing time.";
+                    return RedirectToAction(nameof(Manage), new { eventId });
+                }
 
-            if (result.Enrolment?.Event?.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
+                parsedTime = time;
+            }
 
-            _context.Results.Remove(result);
-            await _context.SaveChangesAsync();
+            var request = new
+            {
+                FinishTime = parsedTime,
+                Position = position,
+                Status = status
+            };
 
-            return NoContent();
+            try
+            {
+                using var response = await _api.PutAsync(
+                    $"api/results/{resultId}", request,
+                    HttpContext.Session.GetString("ApiSessionCookie"));
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    TempData["Error"] = "Could not update the result.";
+                }
+                else
+                {
+                    TempData["Success"] = "Result updated successfully.";
+                }
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] = "Unable to connect to the RaceDay API.";
+            }
+
+            return RedirectToAction(nameof(Manage), new { eventId });
         }
 
-        private static bool IsValidStatus(string status)
+        // Organiser: delete a result
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Delete(int eventId, int resultId)
         {
-            return status == "Finished" ||
-                   status == "DidNotFinish" ||
-                   status == "Disqualified";
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+            {
+                return RedirectToAction("Login", "Auth");
+            }
+
+            try
+            {
+                using var response = await _api.DeleteAsync(
+                    $"api/results/{resultId}",
+                    HttpContext.Session.GetString("ApiSessionCookie"));
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    TempData["Error"] = "Could not delete the result.";
+                }
+                else
+                {
+                    TempData["Success"] = "Result deleted successfully.";
+                }
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] = "Unable to connect to the RaceDay API.";
+            }
+
+            return RedirectToAction(nameof(Manage), new { eventId });
         }
-    }
-
-    public class CreateResultRequest
-    {
-        public int EnrolmentID { get; set; }
-        public TimeSpan? FinishTime { get; set; }
-        public int? Position { get; set; }
-        public string Status { get; set; } = "Finished";
-    }
-
-    public class UpdateResultRequest
-    {
-        public TimeSpan? FinishTime { get; set; }
-        public int? Position { get; set; }
-        public string Status { get; set; } = "Finished";
     }
 }

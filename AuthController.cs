@@ -1,169 +1,171 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
-using RaceDay.API.Data;
-using RaceDay.API.Models;
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using RaceDay.MVC.Models;
+using RaceDay.MVC.Services;
 
-namespace RaceDay.API.Controllers
+namespace RaceDay.MVC.Controllers
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class AuthController : ControllerBase
+    public class AuthController : Controller
     {
-        private readonly AppDbContext _context;
-        private readonly PasswordHasher<User> _passwordHasher = new();
+        private readonly RaceDayApiService _api;
 
-        public AuthController(AppDbContext context)
+        public AuthController(RaceDayApiService api)
         {
-            _context = context;
+            _api = api;
         }
 
-        // POST: api/auth/register
-        [HttpPost("register")]
-        public async Task<IActionResult> Register(
-            [FromBody] RegisterRequest request)
+        [HttpGet]
+        public IActionResult Login()
         {
-            var email = request.Email.Trim();
-
-            if (request.Role != null &&
-                !request.Role.Equals("Organiser",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !request.Role.Equals("Participant",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return BadRequest(new
-                {
-                    message = "Role must be Organiser or Participant."
-                });
-            }
-
-            bool emailExists = await _context.Users
-                .AnyAsync(u => u.Email.ToLower() == email.ToLower());
-
-            if (emailExists)
-            {
-                return Conflict(new
-                {
-                    message = "An account with this email already exists."
-                });
-            }
-
-            var user = new User
-            {
-                FullName = request.FullName.Trim(),
-                Email = email,
-                Role = request.Role.Equals(
-                    "Organiser", StringComparison.OrdinalIgnoreCase)
-                    ? "Organiser"
-                    : "Participant",
-                PhoneNumber = request.PhoneNumber
-            };
-
-            user.PasswordHash = _passwordHasher.HashPassword(
-                user, request.Password);
-
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                message = "Registration successful.",
-                user.UserID,
-                user.FullName,
-                user.Email,
-                user.Role
-            });
+            return View(new LoginViewModel());
         }
 
-        // POST: api/auth/login
-        [HttpPost("login")]
-        public async Task<IActionResult> Login(
-            [FromBody] LoginRequest request)
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginViewModel model)
         {
-            var email = request.Email.Trim();
+            if (!ModelState.IsValid)
+                return View(model);
 
-            var user = await _context.Users.FirstOrDefaultAsync(
-                u => u.Email.ToLower() == email.ToLower());
-
-            if (user == null)
+            try
             {
-                return Unauthorized(new
+                using var response = await _api.PostAsync(
+                    "api/Auth/login",
+                    new { model.Email, model.Password });
+
+                var json = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    message = "Invalid email or password."
-                });
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "Login failed. Please check your email and password.");
+
+                    return View(model);
+                }
+
+                var user = JsonSerializer.Deserialize<AuthResponse>(
+                    json,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                if (user == null ||
+                    user.UserID <= 0 ||
+                    (user.Role != "Organiser" &&
+                     user.Role != "Participant"))
+                {
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "The API returned an invalid login response.");
+
+                    return View(model);
+                }
+
+                var apiCookie = _api.GetApiSessionCookie(response);
+
+                if (string.IsNullOrWhiteSpace(apiCookie))
+                {
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "Login succeeded, but the API session cookie was not received. Check the API session configuration.");
+
+                    return View(model);
+                }
+
+                HttpContext.Session.SetInt32("UserID", user.UserID);
+                HttpContext.Session.SetString("FullName", user.FullName);
+                HttpContext.Session.SetString("Email", user.Email);
+                HttpContext.Session.SetString("Role", user.Role);
+                HttpContext.Session.SetString("ApiSessionCookie", apiCookie);
+
+                if (user.Role == "Organiser")
+                    return RedirectToAction("Dashboard", "Organiser");
+
+                return RedirectToAction("Index", "Home");
             }
-
-            var result = _passwordHasher.VerifyHashedPassword(
-                user, user.PasswordHash, request.Password);
-
-            if (result == PasswordVerificationResult.Failed)
+            catch
             {
-                return Unauthorized(new
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to contact the RaceDay API. Please try again.");
+
+                return View(model);
+            }
+        }
+
+        [HttpGet]
+        public IActionResult Register()
+        {
+            return View(new RegisterViewModel());
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Register(RegisterViewModel model)
+        {
+            if (!ModelState.IsValid)
+                return View(model);
+
+            try
+            {
+                using var response = await _api.PostAsync(
+                    "api/Auth/register",
+                    new
+                    {
+                        model.FullName,
+                        model.Email,
+                        model.Password,
+                        model.Role,
+                        model.PhoneNumber
+                    });
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    message = "Invalid email or password."
-                });
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "Registration failed. Check your details or try another email.");
+
+                    return View(model);
+                }
+
+                TempData["Success"] =
+                    "Registration successful. You can now log in.";
+
+                return RedirectToAction(nameof(Login));
+            }
+            catch
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to contact the RaceDay API. Please try again.");
+
+                return View(model);
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Logout()
+        {
+            var apiCookie = HttpContext.Session.GetString("ApiSessionCookie");
+
+            try
+            {
+                using var response = await _api.PostAsync(
+                    "api/Auth/logout",
+                    new { },
+                    apiCookie);
+            }
+            catch
+            {
+                // Local logout must still proceed if the API is unavailable.
             }
 
             HttpContext.Session.Clear();
-            HttpContext.Session.SetInt32("UserID", user.UserID);
-            HttpContext.Session.SetString("Role", user.Role);
 
-            return Ok(new
-            {
-                message = "Login successful.",
-                user.UserID,
-                user.FullName,
-                user.Email,
-                user.Role
-            });
+            return RedirectToAction(nameof(Login));
         }
-
-        // POST: api/auth/logout
-        [HttpPost("logout")]
-        public IActionResult Logout()
-        {
-            HttpContext.Session.Clear();
-
-            return Ok(new
-            {
-                message = "Logout successful."
-            });
-        }
-    }
-
-    public class RegisterRequest
-    {
-        [Required]
-        [StringLength(100)]
-        public string FullName { get; set; } = string.Empty;
-
-        [Required]
-        [EmailAddress]
-        [StringLength(150)]
-        public string Email { get; set; } = string.Empty;
-
-        [Required]
-        [StringLength(100, MinimumLength = 8)]
-        public string Password { get; set; } = string.Empty;
-
-        [Required]
-        [RegularExpression(
-    "^(?i:Organiser|Participant)$",
-    ErrorMessage = "Role must be Organiser or Participant.")]
-        public string Role { get; set; } = string.Empty;
-
-        [StringLength(30)]
-        public string? PhoneNumber { get; set; }
-    }
-
-    public class LoginRequest
-    {
-        [Required]
-        [EmailAddress]
-        public string Email { get; set; } = string.Empty;
-
-        [Required]
-        public string Password { get; set; } = string.Empty;
     }
 }

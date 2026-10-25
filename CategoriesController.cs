@@ -1,177 +1,232 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RaceDay.API.Data;
-using RaceDay.API.Models;
-using RaceDay.API.Security;
+using RaceDay.MVC.Models;
+using RaceDay.MVC.Services;
+using System.Net.Http;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
-namespace RaceDay.API.Controllers
+namespace RaceDay.MVC.Controllers
 {
-    [ApiController]
-    [Route("api")]
-    public class CategoriesController : ControllerBase
+    public class CategoriesController : Controller
     {
-        private readonly AppDbContext _context;
+        private readonly RaceDayApiService _apiService;
 
-        public CategoriesController(AppDbContext context)
+        public CategoriesController(RaceDayApiService apiService)
         {
-            _context = context;
+            _apiService = apiService;
         }
 
-        // GET: api/events/{eventId}/categories
-        [HttpGet("events/{eventId}/categories")]
-        public async Task<IActionResult> GetCategories(int eventId)
+        [HttpGet]
+        public async Task<IActionResult> Index(int eventId)
         {
-            var eventExists = await _context.Events
-                .AnyAsync(e => e.EventID == eventId);
-
-            if (!eventExists)
-                return NotFound("Event not found.");
-
-            var categories = await _context.Categories
-                .Where(c => c.EventID == eventId)
-                .ToListAsync();
-
-            return Ok(categories);
-        }
-
-        // POST: api/events/{eventId}/categories
-        [HttpPost("events/{eventId}/categories")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> CreateCategory(
-            int eventId, Category category)
-        {
-            var userId = HttpContext.Session.GetInt32("UserID");
-
-            if (userId == null)
-                return Unauthorized();
-
-            var existingEvent = await _context.Events
-                .FirstOrDefaultAsync(e => e.EventID == eventId);
-
-            if (existingEvent == null)
-                return NotFound("Event not found.");
-
-            if (existingEvent.OrganiserID != userId.Value)
-                return StatusCode(StatusCodes.Status403Forbidden);
-
-            if (category.DistanceKm <= 0 ||
-                category.EntryFee < 0 ||
-                category.MaxParticipants <= 0)
+            if (HttpContext.Session.GetString("Role") != "Organiser")
             {
-                return BadRequest(
-                    "Distance must be positive, entry fee cannot be negative, " +
-                    "and maximum participants must be positive.");
+                return RedirectToAction("Login", "Auth");
             }
 
-            category.CategoryID = 0;
-            category.EventID = eventId;
-            category.Event = null;
-
-            _context.Categories.Add(category);
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
 
             try
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateException)
-            {
-                return Conflict(
-                    "A category with this name may already exist for this event.");
-            }
+                var categories =
+                    await _apiService.GetAsync<List<CategoryViewModel>>(
+                        $"api/events/{eventId}/categories", cookie);
 
-            return CreatedAtAction(
-                nameof(GetCategories),
-                new { eventId = eventId },
-                category);
+                ViewBag.EventID = eventId;
+
+                return View(categories ?? new List<CategoryViewModel>());
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] =
+                    "Unable to load categories. Please try again.";
+
+                ViewBag.EventID = eventId;
+
+                return View(new List<CategoryViewModel>());
+            }
         }
 
-        // PUT: api/categories/{id}
-        [HttpPut("categories/{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> UpdateCategory(
-            int id, Category updatedCategory)
+        [HttpGet]
+        public IActionResult Create(int eventId)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
-
-            if (userId == null)
-                return Unauthorized();
-
-            var category = await _context.Categories
-                .Include(c => c.Event)
-                .FirstOrDefaultAsync(c => c.CategoryID == id);
-
-            if (category == null)
-                return NotFound();
-
-            if (category.Event == null ||
-                category.Event.OrganiserID != userId.Value)
+            if (HttpContext.Session.GetString("Role") != "Organiser")
             {
-                return StatusCode(StatusCodes.Status403Forbidden);
+                return RedirectToAction("Login", "Auth");
             }
 
-            if (updatedCategory.DistanceKm <= 0 ||
-                updatedCategory.EntryFee < 0 ||
-                updatedCategory.MaxParticipants <= 0)
+            return View(new CategoryViewModel
             {
-                return BadRequest(
-                    "Distance must be positive, entry fee cannot be negative, " +
-                    "and maximum participants must be positive.");
+                EventID = eventId,
+                DistanceKm = 5,
+                EntryFee = 0,
+                MaxParticipants = 100
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(CategoryViewModel model)
+        {
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+            {
+                return RedirectToAction("Login", "Auth");
             }
 
-            category.CategoryName = updatedCategory.CategoryName;
-            category.DistanceKm = updatedCategory.DistanceKm;
-            category.EntryFee = updatedCategory.EntryFee;
-            category.MaxParticipants = updatedCategory.MaxParticipants;
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
+
+            var category = new
+            {
+                model.CategoryName,
+                model.DistanceKm,
+                model.EntryFee,
+                model.MaxParticipants
+            };
 
             try
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateException)
-            {
-                return Conflict(
-                    "A category with this name may already exist for this event.");
-            }
+                using var response = await _apiService.PostAsync(
+                    $"api/events/{model.EventID}/categories",
+                    category,
+                    cookie);
 
-            return Ok(category);
+                if (response.IsSuccessStatusCode)
+                {
+                    TempData["Success"] = "Category added successfully!";
+
+                    return RedirectToAction(
+                        nameof(Index),
+                        new { eventId = model.EventID });
+                }
+
+                ModelState.AddModelError(
+                    string.Empty,
+                    $"The category could not be added. Status code: {(int)response.StatusCode}.");
+
+                return View(model);
+            }
+            catch (HttpRequestException)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to contact the RaceDay API. Please try again.");
+
+                return View(model);
+            }
         }
-
-        // DELETE: api/categories/{id}
-        [HttpDelete("categories/{id}")]
-        [RoleAuthorize("Organiser")]
-        public async Task<IActionResult> DeleteCategory(int id)
+    
+// GET: Edit a category
+        [HttpGet]
+        public async Task<IActionResult> Edit(int id, int eventId)
         {
-            var userId = HttpContext.Session.GetInt32("UserID");
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+                return RedirectToAction("Login", "Auth");
 
-            if (userId == null)
-                return Unauthorized();
-
-            var category = await _context.Categories
-                .Include(c => c.Event)
-                .FirstOrDefaultAsync(c => c.CategoryID == id);
-
-            if (category == null)
-                return NotFound();
-
-            if (category.Event == null ||
-                category.Event.OrganiserID != userId.Value)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            _context.Categories.Remove(category);
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
 
             try
             {
-                await _context.SaveChangesAsync();
+                var categories =
+                    await _apiService.GetAsync<List<CategoryViewModel>>(
+                        $"api/events/{eventId}/categories", cookie);
+
+                var category = categories?.FirstOrDefault(
+                    c => c.CategoryID == id);
+
+                if (category == null)
+                    return NotFound();
+
+                return View(category);
             }
-            catch (DbUpdateException)
+            catch (HttpRequestException)
             {
-                return Conflict(
-                    "This category cannot be deleted because it may have enrolments or other related records.");
+                TempData["Error"] =
+                    "Unable to load the category. Please try again.";
+
+                return RedirectToAction(nameof(Index), new { eventId });
+            }
+        }
+
+        // POST: Save category changes
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(CategoryViewModel model)
+        {
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+                return RedirectToAction("Login", "Auth");
+
+            if (!ModelState.IsValid)
+                return View(model);
+
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
+
+            try
+            {
+                using var response = await _apiService.PutAsync(
+                    $"api/categories/{model.CategoryID}",
+                    model,
+                    cookie);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    TempData["Success"] = "Category updated successfully!";
+
+                    return RedirectToAction(
+                        nameof(Index),
+                        new { eventId = model.EventID });
+                }
+
+                ModelState.AddModelError(
+                    string.Empty,
+                    $"Unable to update category. Status code: {(int)response.StatusCode}.");
+
+                return View(model);
+            }
+            catch (HttpRequestException)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to contact the RaceDay API. Please try again.");
+
+                return View(model);
+            }
+        }
+
+        // POST: Delete a category
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Delete(int id, int eventId)
+        {
+            if (HttpContext.Session.GetString("Role") != "Organiser")
+                return RedirectToAction("Login", "Auth");
+
+            var cookie = HttpContext.Session.GetString("ApiSessionCookie");
+
+            try
+            {
+                using var response = await _apiService.DeleteAsync(
+                    $"api/categories/{id}", cookie);
+
+                if (response.IsSuccessStatusCode)
+                    TempData["Success"] = "Category deleted successfully!";
+                else
+                    TempData["Error"] =
+                        $"Unable to delete category. Status code: {(int)response.StatusCode}. " +
+                        "It may have related enrolments.";
+
+            }
+            catch (HttpRequestException)
+            {
+                TempData["Error"] =
+                    "Unable to contact the RaceDay API. Please try again.";
             }
 
-            return NoContent();
+            return RedirectToAction(nameof(Index), new { eventId });
         }
     }
 }
