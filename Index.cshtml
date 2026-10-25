@@ -1,15 +1,23 @@
-﻿@model RaceDay.MVC.Models.ProfileViewModel
+﻿@model List<RaceDay.MVC.Models.CategoryViewModel>
 
 @{
-    ViewData["Title"] = "My Profile";
+    ViewData["Title"] = "Manage Categories";
+    int eventId = ViewBag.EventID ?? 0;
 }
 
 <div class="container py-5">
-    <div class="mb-4">
-        <h1 class="fw-bold">My Profile</h1>
-        <p class="text-muted">
-            Keep your RaceDay account details up to date.
-        </p>
+    <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
+        <div>
+            <h1 class="display-5 fw-bold">Manage Categories</h1>
+            <p class="lead">Manage the categories available for this event.</p>
+        </div>
+
+        <a asp-controller="Categories"
+           asp-action="Create"
+           asp-route-eventId="@eventId"
+           class="btn btn-primary">
+            + Add Category
+        </a>
     </div>
 
     @if (TempData["Success"] != null)
@@ -26,66 +34,71 @@
         </div>
     }
 
-    <div class="card shadow-sm border-0">
-        <div class="card-body p-4">
-            <form asp-action="Index" method="post">
-                @Html.AntiForgeryToken()
-
-                <div asp-validation-summary="ModelOnly"
-                     class="text-danger mb-3"></div>
-
-                <div class="mb-3">
-                    <label asp-for="FullName"
-                           class="form-label"></label>
-                    <input asp-for="FullName"
-                           class="form-control" />
-                    <span asp-validation-for="FullName"
-                          class="text-danger"></span>
-                </div>
-
-                <div class="mb-3">
-                    <label asp-for="Email"
-                           class="form-label"></label>
-                    <input asp-for="Email"
-                           class="form-control"
-                           readonly />
-                </div>
-
-                <div class="mb-3">
-                    <label asp-for="PhoneNumber"
-                           class="form-label"></label>
-                    <input asp-for="PhoneNumber"
-                           class="form-control" />
-                    <span asp-validation-for="PhoneNumber"
-                          class="text-danger"></span>
-                </div>
-
-                <div class="mb-3">
-                    <label asp-for="Role"
-                           class="form-label"></label>
-                    <input asp-for="Role"
-                           class="form-control"
-                           readonly />
-                </div>
-
-                <div class="mb-4">
-                    <label asp-for="CreatedAt"
-                           class="form-label"></label>
-                    <input value="@(Model.CreatedAt?.ToString("dd MMMM yyyy") ?? "Not available")"
-                           class="form-control"
-                           readonly />
-                </div>
-
-                <button type="submit" class="btn btn-primary">
-                    Save Changes
-                </button>
-
-                <a asp-controller="Home"
-                   asp-action="Index"
-                   class="btn btn-outline-secondary ms-2">
-                    Back to Home
-                </a>
-            </form>
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">
+            No categories have been added to this event yet.
+            Select Add Category to create one.
         </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Category</th>
+                        <th>Distance (km)</th>
+                        <th>Entry Fee</th>
+                        <th>Maximum Participants</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var category in Model)
+                    {
+                        <tr>
+                            <td>@category.CategoryName</td>
+                            <td>@category.DistanceKm.ToString("0.##")</td>
+                            <td>R @category.EntryFee.ToString("0.00")</td>
+                            <td>@category.MaxParticipants</td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <a asp-controller="Categories"
+                                       asp-action="Edit"
+                                       asp-route-id="@category.CategoryID"
+                                       asp-route-eventId="@category.EventID"
+                                       class="btn btn-sm btn-outline-primary">
+                                        Edit
+                                    </a>
+
+                                    <form asp-controller="Categories"
+                                          asp-action="Delete"
+                                          asp-route-id="@category.CategoryID"
+                                          asp-route-eventId="@category.EventID"
+                                          method="post"
+                                          onsubmit="return confirm('Are you sure you want to delete this category?');">
+                                        @Html.AntiForgeryToken()
+
+                                        <button type="submit"
+                                                class="btn btn-sm btn-outline-danger">
+                                            Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="mt-4">
+        <a asp-controller="Organiser"
+           asp-action="ManageEvents"
+           class="btn btn-outline-secondary">
+            Back to Manage Events
+        </a>
     </div>
 </div>

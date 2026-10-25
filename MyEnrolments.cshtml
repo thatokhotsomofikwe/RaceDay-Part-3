@@ -1,0 +1,113 @@
+﻿@model List<RaceDay.MVC.Models.EnrolmentViewModel>
+
+@{
+    ViewData["Title"] = "My Enrolments";
+}
+
+<div class="container py-5">
+    <div class="mb-4">
+        <h1 class="display-5 fw-bold">My Enrolments</h1>
+        <p class="lead">
+            View the events you've entered.
+        </p>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">
+            @TempData["Success"]
+        </div>
+    }
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-warning">
+            @TempData["Error"]
+        </div>
+    }
+
+    @if (ViewBag.Error != null)
+    {
+        <div class="alert alert-warning">
+            @ViewBag.Error
+        </div>
+    }
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">
+            You haven't enrolled in any events yet.
+            Visit the Events page to find your next challenge.
+        </div>
+
+        <a asp-controller="Events"
+           asp-action="Index"
+           class="btn btn-primary">
+            Browse Events
+        </a>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var item in Model)
+            {
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <h3 class="card-title">
+                                @item.EventName
+                            </h3>
+
+                            <p>
+                                <strong>Category ID:</strong>
+                                @item.CategoryID
+                            </p>
+
+                            <p>
+                                <strong>Category:</strong>
+                                @item.CategoryName
+                            </p>
+
+                            <p>
+                                <strong>Enrolled:</strong>
+                                @item.EnrolmentDate.ToString("dd MMM yyyy")
+                            </p>
+
+                            <p>
+                                <strong>Status:</strong>
+                                <span class="badge bg-primary">
+                                    @item.Status
+                                </span>
+                            </p>
+
+                            <form asp-controller="Enrolments"
+                                  asp-action="Cancel"
+                                  method="post"
+                                  onsubmit="return confirm('Are you sure you want to cancel this enrolment?');">
+
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden"
+                                       name="id"
+                                       value="@item.EnrolmentID" />
+
+                                <button type="submit"
+                                        class="btn btn-outline-danger w-100">
+                                    Cancel Enrolment
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="mt-4">
+        <a asp-controller="Events"
+           asp-action="Index"
+           class="btn btn-outline-secondary">
+            Back to Events
+        </a>
+    </div>
+</div>

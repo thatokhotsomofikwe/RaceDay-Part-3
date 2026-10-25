@@ -1,0 +1,155 @@
+﻿@model RaceDay.MVC.Controllers.EventDetailsViewModel
+
+@{
+    ViewData["Title"] = "Event Details";
+}
+
+<div class="container py-5">
+    @if (ViewBag.Error != null)
+    {
+        <div class="alert alert-warning">@ViewBag.Error</div>
+    }
+
+    <div class="mb-4">
+        <a asp-controller="Events" asp-action="Index"
+           class="btn btn-outline-secondary mb-3">
+            &larr; Back to Events
+        </a>
+
+        <span class="badge bg-primary d-block mb-2" style="width: fit-content;">
+            @Model.Event.EventType
+        </span>
+
+        <h1 class="display-5 fw-bold">@Model.Event.Name</h1>
+
+        <p class="lead">@Model.Event.Description</p>
+    </div>
+
+    @* Event image *@
+    @if (!string.IsNullOrWhiteSpace(Model.Event.ImageUrl))
+    {
+        <div class="card shadow-sm mb-4 overflow-hidden">
+            <img src="@Model.Event.ImageUrl"
+                 class="img-fluid w-100"
+                 alt="@Model.Event.Name event image"
+                 style="max-height: 450px; object-fit: cover;"
+                 onerror="this.style.display='none';" />
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-light border mb-4">
+            No event image is available.
+        </div>
+    }
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h4 mb-3">Event Information</h2>
+
+            <p>
+                <strong>Date:</strong>
+                @Model.Event.EventDate.ToString("dd MMMM yyyy")
+            </p>
+
+            <p>
+                <strong>Location:</strong>
+                @Model.Event.Location
+            </p>
+
+            <p>
+                <strong>Distance:</strong>
+                @Model.Event.Distance km
+            </p>
+
+            <p>
+                <strong>Event Type:</strong>
+                @Model.Event.EventType
+            </p>
+
+            <p class="mb-0">
+                <strong>Status:</strong>
+                @if (Model.Event.Status == "Open")
+                {
+                    <span class="badge bg-success">Open</span>
+                }
+                else if (Model.Event.Status == "Upcoming")
+                {
+                    <span class="badge bg-primary">Upcoming</span>
+                }
+                else
+                {
+                    <span class="badge bg-secondary">
+                        @(string.IsNullOrWhiteSpace(Model.Event.Status)
+                            ? "Not specified"
+                            : Model.Event.Status)
+                    </span>
+                }
+            </p>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h2 class="h3 mb-3">Available Categories</h2>
+
+        @if (Model.Categories == null || !Model.Categories.Any())
+        {
+            <div class="alert alert-info">
+                No categories have been added to this event yet.
+            </div>
+        }
+        else
+        {
+            <div class="row g-4">
+                @foreach (var category in Model.Categories)
+                {
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100 shadow-sm">
+                            <div class="card-body">
+                                <h3 class="h5">@category.CategoryName</h3>
+
+                                <p>
+                                    <strong>Distance:</strong>
+                                    @category.DistanceKm km
+                                </p>
+
+                                <p>
+                                    <strong>Entry Fee:</strong>
+                                    R @category.EntryFee.ToString("N2")
+                                </p>
+
+                                <p>
+                                    <strong>Maximum Participants:</strong>
+                                    @category.MaxParticipants
+                                </p>
+
+                                @if (Context.Session.GetString("Role") == "Participant")
+                                {
+                                    <a asp-controller="Enrolments"
+                                       asp-action="Create"
+                                       asp-route-eventId="@Model.Event.EventID"
+                                       class="btn btn-primary w-100">
+                                        Enrol in Event
+                                    </a>
+                                }
+                                else if (string.IsNullOrEmpty(Context.Session.GetString("Role")))
+                                {
+                                    <a asp-controller="Auth"
+                                       asp-action="Login"
+                                       class="btn btn-outline-primary w-100">
+                                        Log in to Enrol
+                                    </a>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <a asp-controller="Events" asp-action="Index"
+       class="btn btn-outline-secondary">
+        Back to Events
+    </a>
+</div>
